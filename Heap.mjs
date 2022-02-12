@@ -1,3 +1,5 @@
+// @ts-check
+
 class HeapNode{
     /**
      * @type {HeapNode}
@@ -13,7 +15,7 @@ class HeapNode{
     top = undefined;
     /**
      * 
-     * @param {Any} value 
+     * @param {HeapValue} value 
      */
     constructor(value) {
         this.value = value;   
@@ -28,6 +30,18 @@ class HeapNode{
     }
 }
 
+export class HeapValue{
+    /** @type {HeapNode} */
+    node = undefined;
+    value = undefined;
+    /**
+     * @param {any} value 
+     */
+    constructor(value) {
+        this.value = value;
+    }
+}
+
 export class Heap{
     /**
      * @type {HeapNode}
@@ -35,8 +49,7 @@ export class Heap{
     #entry = undefined;
     #length = 0;
     /**
-     * 
-     * @param {Function} compare the relation of bottom->top
+     * @param {(A:any,B:any)=>boolean} compare the relation of bottom->top
      */
     constructor(compare) {
         /**
@@ -46,16 +59,17 @@ export class Heap{
          * @returns {Boolean}
          */
         this.#compare = (n1,n2)=>{
-            return compare(n1.value,n2.value);
+            return compare(n1.value.value,n2.value.value);
         };
     }
 
     /**
      * 
-     * @param {Any} value 
+     * @param {HeapValue} value 
      */
     add(value){
         let newNode = new HeapNode(value);
+        value.node = newNode;
         if(this.#entry === undefined){
             this.#entry = newNode;
             this.#length ++;
@@ -68,10 +82,10 @@ export class Heap{
     }
 
     /**
-     * @param {any} value 
+     * @param {HeapValue} value 
      */
     delete(value){
-        let node = this.#findNode(this.#entry,value);
+        let node = value.node;
         if(node === undefined){
             return false;
         }
@@ -83,6 +97,7 @@ export class Heap{
         let tailTop = this.#getTop(this.#length);
         let tailNode = tailTop.branch==='left'?tailTop.node.left:tailTop.node.right;
         node.value = tailNode.value;
+        node.value.node = node;
         this.#length --;
         if(tailTop.branch==='left'){
             tailTop.node.left = undefined;
@@ -96,14 +111,14 @@ export class Heap{
     }
 
     /**
-     * @returns {Any}
+     * @returns {HeapValue}
      */
     get(){
         return this.#entry?.value;
     }
 
     /**
-     * @returns {Any}
+     * @returns {HeapValue}
      */
     pop(){
         const result = this.#entry?.value;
@@ -114,38 +129,23 @@ export class Heap{
         }else if(this.#length > 1){
             let {node,branch} = this.#getTop(this.#length);
             this.#entry.value = node[branch].value;
+            this.#entry.value.node = this.#entry;
             node[branch] = undefined;
             this.#length --;
             this.#adjustForeward(this.#entry);
         }
+        if(result !== undefined){
+            result.node = undefined;
+        }
         return result;
     }
 
-
-    #compare = ()=>{}
-
     /**
-     * @param {HeapNode} node 
-     * @param {any} value 
-     * @returns {HeapNode|undefined} 
+     * @param {HeapNode} A 
+     * @param {HeapNode} B
+     * @returns {boolean} 
      */
-    #findNode(node,value){
-        if(node === undefined){
-            return undefined;
-        }
-        if(node.value === value){
-            return node;
-        }
-        let left = this.#findNode(node.left,value);
-        if(left !== undefined){
-            return left;
-        }
-        let right = this.#findNode(node.right,value);
-        if(right !== undefined){
-            return right;
-        }
-        return undefined;
-    }
+    #compare = (A,B)=>undefined;
 
     /**
      * 
@@ -158,7 +158,7 @@ export class Heap{
                 targetNode = node.left;
             }
         }else if(node.left === undefined && node.right !== undefined){
-            if(this.#compare(node.node.right)){
+            if(this.#compare(node,node.right)){
                 targetNode = node.right;
             }
         }else if(node.left !== undefined && node.right !== undefined){
@@ -176,7 +176,9 @@ export class Heap{
             // exchange value instead of adjusting connection
             let tempValue = node.value;
             node.value = targetNode.value;
+            node.value.node = node;
             targetNode.value = tempValue;
+            targetNode.value.node = targetNode;
             this.#adjustForeward(targetNode);
         }
     }
@@ -193,7 +195,9 @@ export class Heap{
             // exchange value instead of adjusting connection
             let tempValue = node.value;
             node.value = node.top.value;
+            node.value.node = node;
             node.top.value = tempValue;
+            node.top.value.node = node.top;
             this.#adjustBackward(node.top);
         }
     }
