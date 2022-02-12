@@ -1,0 +1,1 @@
+The intrusive impelmatation ask the user to keep a reference of the heap node in their application. This can dramatically increase delete/adjust speed. However, it could be dangrous if the node reference is tempered with.
