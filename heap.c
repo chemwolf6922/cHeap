@@ -2,31 +2,40 @@
 #include <stdlib.h>
 #include <stddef.h>
 
-typedef struct heap_node_s{
-    void* value;
+typedef struct heap_value_s heap_value_t;
+
+typedef struct heap_node_s
+{
+    heap_value_t* heap_value;
     struct heap_node_s* left;
     struct heap_node_s* right;
     struct heap_node_s* top;
 }heap_node_t;
 
-typedef struct{
+struct heap_value_s
+{
+    heap_node_t* node;
+    void* value;
+};
+
+typedef struct
+{
     struct heap_node_s* entry;
     int length;
-    heap_compare_t compare;
+    bool(*compare)(void* A,void* B);
 }heap_t;
 
 /* function predefines */
 heap_node_t* heap_get_top(heap_t* heap,int n,bool* is_left);
-void heap_adjust_backward(heap_t* heap,heap_node_t* node);
-void heap_adjust_forward(heap_t* heap,heap_node_t* node);
-void heap_free_node(heap_node_t* node,heap_free_value_t free_value);
-heap_node_t* heap_new_node(void* value);
-heap_node_t* heap_find_node(heap_node_t* node,void* value,bool* found);
-void heap_dump_node(heap_node_t* node,void** dump,int* i);
+heap_node_t* heap_adjust_backward(heap_t* heap,heap_node_t* node);
+heap_node_t* heap_adjust_forward(heap_t* heap,heap_node_t* node);
+void heap_free_node(heap_node_t* node,void(*free_value)(void* value,void* ctx), void* ctx,bool propagate);
+heap_node_t* heap_new_node(heap_value_t* heap_value);
+heap_value_t* heap_new_value(void* value);
 
 /* public functions */
 
-heap_handle_t heap_create(heap_compare_t compare)
+heap_handle_t heap_create(bool(*compare)(void* A,void* B))
 {
     if(compare == NULL)
         return NULL;
@@ -39,28 +48,34 @@ heap_handle_t heap_create(heap_compare_t compare)
     return (heap_handle_t)heap;
 }
 
-void heap_free(heap_handle_t handle,heap_free_value_t free_value)
+void heap_free(heap_handle_t handle,void(*free_value)(void* value,void* ctx),void* ctx)
 {
     if(handle == NULL)
         return;
     heap_t* heap = (heap_t*)handle;
-    heap_free_node(heap->entry,free_value);
+    heap_free_node(heap->entry,free_value,ctx,true);
     free(heap);
 }
 
-bool heap_add(heap_handle_t handle,void* value)
+heap_value_handle_t heap_add(heap_handle_t handle,void* value)
 {
     if(!handle)
-        return false;
+        return NULL;
     heap_t* heap = (heap_t*)handle;
-    heap_node_t* new_node = heap_new_node(value);
+    heap_value_t* heap_value = heap_new_value(value);
+    if(!heap_value)
+        return NULL;
+    heap_node_t* new_node = heap_new_node(heap_value);
     if(!new_node)
-        return false;
+    {
+        free(heap_value);
+        return NULL;
+    }
     if(heap->entry == NULL)
     {
         heap->entry = new_node;
         heap->length ++;
-        return true;
+        return (void*)heap_value;
     }
     bool is_left;
     heap_node_t* node = heap_get_top(heap,++heap->length,&is_left);
@@ -70,21 +85,24 @@ bool heap_add(heap_handle_t handle,void* value)
         node->right = new_node;
     new_node->top = node;
     heap_adjust_backward(heap,new_node);
-    return true;
+    return (void*)heap_value;
 }
 
-bool heap_delete(heap_handle_t handle,void* value)
+bool heap_delete(heap_handle_t handle,heap_value_handle_t heap_value_handle)
 {
     if(!handle)
         return false;
     heap_t* heap = (heap_t*)handle;
-    bool found = false;
-    heap_node_t* node = heap_find_node(heap->entry,value,&found);
+    if(!heap_value_handle)
+        return false;
+    heap_value_t* heap_value = (heap_value_t*)heap_value_handle;
+    heap_node_t* node = heap_value->node;
     if(!node)
         return false;
     if(heap->length == 1)
     {
-        heap_free_node(node,NULL);
+        /* free the only node */
+        heap_free_node(node,NULL,NULL,false);
         heap->entry = NULL;
         heap->length --;
         return true;
@@ -92,15 +110,41 @@ bool heap_delete(heap_handle_t handle,void* value)
     bool is_left;
     heap_node_t* tail_top_node = heap_get_top(heap,heap->length,&is_left);
     heap_node_t* tail_node = is_left?tail_top_node->left:tail_top_node->right;
-    node->value = tail_node->value;
-    heap_free_node(tail_node,NULL);
+    /* switch node & tail_node value */
+    heap_value_t* temp_heap_value = node->heap_value;
+    node->heap_value = tail_node->heap_value;
+    node->heap_value->node = node;
+    tail_node->heap_value = temp_heap_value;
+    /* redundant */
+    // tail_node->heap_value->node = tail_node;
+    /* free the tail node */
+    heap_free_node(tail_node,NULL,NULL,false);
     heap->length --;
     if(is_left)
         tail_top_node->left = NULL;
     else
         tail_top_node->right = NULL;
     if(node != tail_node)
+    {
+        node = heap_adjust_backward(heap,node);
         heap_adjust_forward(heap,node);
+    } 
+    return true;
+}
+
+bool heap_update(heap_handle_t handle,heap_value_handle_t value_handle)
+{
+    if(!handle)
+        return false;
+    heap_t* heap = (heap_t*)handle;
+    if(!value_handle)
+        return false;
+    heap_value_t* heap_value = (heap_value_t*)value_handle;
+    heap_node_t* node = heap_value->node;
+    if(!node)
+        return false;
+    node = heap_adjust_backward(heap,node);
+    heap_adjust_forward(heap,node);
     return true;
 }
 
@@ -111,24 +155,32 @@ void* heap_pop(heap_handle_t handle)
     heap_t* heap = (heap_t*)handle;
     void* result = NULL;
     if(heap->entry != NULL)
-        result = heap->entry->value;
+        result = heap->entry->heap_value->value;
     if(heap->length == 1)
     {
         heap->length--;
-        heap_free_node(heap->entry,NULL);
+        /* free the only node */
+        heap_free_node(heap->entry,NULL,NULL,false);
         heap->entry = NULL;
     }
     else if(heap->length > 1)
     {
         bool is_left;
-        heap_node_t* top_node = heap_get_top(heap,heap->length,&is_left);
-        heap_node_t* node = is_left?top_node->left:top_node->right;
-        heap->entry->value = node->value;
-        heap_free_node(node,NULL);
+        heap_node_t* tail_top_node = heap_get_top(heap,heap->length,&is_left);
+        heap_node_t* tail_node = is_left?tail_top_node->left:tail_top_node->right;
+        heap_value_t* temp_heap_value = heap->entry->heap_value;
+        /* switch entry & tail value */
+        heap->entry->heap_value = tail_node->heap_value;
+        heap->entry->heap_value->node = heap->entry;
+        tail_node->heap_value = temp_heap_value;
+        /* redundant */
+        // tail_node->heap_value->node = tail_node;
+        /* free the tail node */
+        heap_free_node(tail_node,NULL,NULL,false);
         if(is_left)
-            top_node->left = NULL;
+            tail_top_node->left = NULL;
         else
-            top_node->right = NULL;
+            tail_top_node->right = NULL;
         heap->length--;
         heap_adjust_forward(heap,heap->entry);
     }
@@ -142,7 +194,7 @@ void* heap_get(heap_handle_t handle)
     heap_t* heap = (heap_t*)handle;
     void* result = NULL;
     if(heap->entry != NULL)
-        result = heap->entry->value;
+        result = heap->entry->heap_value->value;
     return result;
 }
 
@@ -152,24 +204,6 @@ int heap_get_length(heap_handle_t handle)
         return -1;
     heap_t* heap = (heap_t*)handle;
     return heap->length;
-}
-
-void** heap_dump(heap_handle_t handle)
-{
-    if(!handle)
-        return NULL;
-    heap_t* heap = (heap_t*)handle;
-    if(heap->length == 0)
-        return NULL;
-    void** dump = malloc(sizeof(void*)*heap->length);
-    int i = 0;
-    heap_dump_node(heap->entry,dump,&i);
-    return dump;
-}
-
-void heap_dump_free(void** dump)
-{
-    free(dump);
 }
 
 /* private functions */
@@ -194,26 +228,32 @@ heap_node_t* heap_get_top(heap_t* heap,int n,bool* is_left)
     return node;
 }
 
-void heap_adjust_backward(heap_t* heap,heap_node_t* node)
+heap_node_t* heap_adjust_backward(heap_t* heap,heap_node_t* node)
 {
     if(node->top == NULL)
-        return;
-    if(heap->compare(node->top->value,node->value))
+        return node;
+    if(heap->compare(node->top->heap_value->value,node->heap_value->value))
     {
-        void* temp_value = node->value;
-        node->value = node->top->value;
-        node->top->value = temp_value;
-        heap_adjust_backward(heap,node->top);
+        heap_value_t* temp_heap_value = node->heap_value;
+        node->heap_value = node->top->heap_value;
+        node->heap_value->node = node;
+        node->top->heap_value = temp_heap_value;
+        node->top->heap_value->node = node->top;
+        return heap_adjust_backward(heap,node->top);
+    }
+    else
+    {
+        return node;
     }
 }
 
-void heap_adjust_forward(heap_t* heap,heap_node_t* node)
+heap_node_t* heap_adjust_forward(heap_t* heap,heap_node_t* node)
 {
     heap_node_t* target_node = NULL;
     if(node->left != NULL && node->right != NULL)
     {
         heap_node_t* less_node = NULL;
-        if(heap->compare(node->left->value,node->right->value))
+        if(heap->compare(node->left->heap_value->value,node->right->heap_value->value))
         {
             less_node = node->right;
         }
@@ -221,35 +261,41 @@ void heap_adjust_forward(heap_t* heap,heap_node_t* node)
         {
             less_node = node->left;
         }
-        if(heap->compare(node->value,less_node->value))
+        if(heap->compare(node->heap_value->value,less_node->heap_value->value))
         {
             target_node = less_node;
         }
     }
     else if(node->left != NULL && node->right == NULL)
     {
-        if(heap->compare(node->value,node->left->value))
+        if(heap->compare(node->heap_value->value,node->left->heap_value->value))
         {
             target_node = node->left;
         }
     }
     else if(node->left == NULL && node->right != NULL)
     {
-        if(heap->compare(node->value,node->right->value))
+        if(heap->compare(node->heap_value->value,node->right->heap_value->value))
         {
             target_node = node->right;
         }
     }
     if(target_node != NULL)
     {
-        void* temp_value = node->value;
-        node->value = target_node->value;
-        target_node->value = temp_value;
-        heap_adjust_forward(heap,target_node);
+        heap_value_t* temp_heap_value = node->heap_value;
+        node->heap_value = target_node->heap_value;
+        node->heap_value->node = node;
+        target_node->heap_value = temp_heap_value;
+        target_node->heap_value->node = target_node;
+        return heap_adjust_forward(heap,target_node);
+    }
+    else
+    {
+        return node;
     }
 }
 
-void heap_free_node(heap_node_t* node,heap_free_value_t free_value)
+void heap_free_node(heap_node_t* node,void(*free_value)(void* value,void* ctx), void* ctx,bool propagate)
 {
     if(node == NULL)
         return;
@@ -257,15 +303,22 @@ void heap_free_node(heap_node_t* node,heap_free_value_t free_value)
     heap_node_t* left = node->left;
     heap_node_t* right = node->right;
 
-    if(free_value != NULL)
-        free_value(node->value);
+    if(node->heap_value != NULL)
+    {
+        if(free_value != NULL)
+            free_value(node->heap_value->value,ctx);
+        free(node->heap_value);
+    }
     free(node);
     
-    heap_free_node(left,free_value);
-    heap_free_node(right,free_value);
+    if(propagate)
+    {
+        heap_free_node(left,free_value,ctx,propagate);
+        heap_free_node(right,free_value,ctx,propagate);
+    }
 }
 
-heap_node_t* heap_new_node(void* value)
+heap_node_t* heap_new_node(heap_value_t* heap_value)
 {
     heap_node_t* node = malloc(sizeof(heap_node_t));
     if(!node)
@@ -273,36 +326,16 @@ heap_node_t* heap_new_node(void* value)
     node->left = NULL;
     node->right = NULL;
     node->top = NULL;
-    node->value = (void*)value;
+    node->heap_value = heap_value;
+    heap_value->node = node;
     return node;
 }
 
-heap_node_t* heap_find_node(heap_node_t* node,void* value,bool* found)
+heap_value_t* heap_new_value(void* value)
 {
-    if(*found)
+    heap_value_t* heap_value = malloc(sizeof(heap_value_t));
+    if(!heap_value)
         return NULL;
-    if(node == NULL)
-        return NULL;
-    if(node->value == value)
-    {
-        *found = true;
-        return node;
-    }
-    heap_node_t* find_left = heap_find_node(node->left,value,found);
-    if(find_left)
-        return find_left;
-    heap_node_t* find_right = heap_find_node(node->right,value,found);
-    if(find_right)
-        return find_right;
-    return NULL;
-}
-
-void heap_dump_node(heap_node_t* node,void** dump,int* i)
-{
-    if(node == NULL)
-        return;
-    dump[*i] = node->value;
-    *i = *i + 1;
-    heap_dump_node(node->left,dump,i);
-    heap_dump_node(node->right,dump,i);
+    heap_value->value = value;
+    return heap_value;
 }
