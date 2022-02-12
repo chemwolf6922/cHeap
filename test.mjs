@@ -24,6 +24,9 @@ console.log(heap.get().value);
 
 heap.delete(bH);
 console.log(heap.get().value);
+c.v = 1;
+heap.adjust(cH);
+console.log(heap.get().value);
 heap.delete(aH);
 heap.delete(cH);
 

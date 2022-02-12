@@ -105,8 +105,22 @@ export class Heap{
             tailTop.node.right = undefined;
         }
         if(node !== tailNode){
+            node = this.#adjustBackward(node);
             this.#adjustForeward(node);
         }
+        return true;
+    }
+
+    /**
+     * @param {HeapValue} value 
+     */
+    adjust(value){
+        let node = value.node;
+        if(node === undefined){
+            return false;
+        }
+        node = this.#adjustBackward(node);
+        this.#adjustForeward(node);
         return true;
     }
 
@@ -150,6 +164,7 @@ export class Heap{
     /**
      * 
      * @param {HeapNode} node the top node  
+     * @returns {HeapNode}
      */
     #adjustForeward(node){
         let targetNode = undefined;
@@ -179,17 +194,20 @@ export class Heap{
             node.value.node = node;
             targetNode.value = tempValue;
             targetNode.value.node = targetNode;
-            this.#adjustForeward(targetNode);
+            return this.#adjustForeward(targetNode);
+        }else{
+            return node;
         }
     }
 
     /**
      * 
      * @param {HeapNode} node the bottom node 
+     * @returns {HeapNode}
      */
     #adjustBackward(node){
         if(node.top === undefined){
-            return;
+            return node;
         }
         if(this.#compare(node.top,node)){
             // exchange value instead of adjusting connection
@@ -198,7 +216,9 @@ export class Heap{
             node.value.node = node;
             node.top.value = tempValue;
             node.top.value.node = node.top;
-            this.#adjustBackward(node.top);
+            return this.#adjustBackward(node.top);
+        }else{
+            return node;
         }
     }
 
