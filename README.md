@@ -1,0 +1,1 @@
+This library is deprecated, use [cHeapRaw](https://github.com/chemwolf6922/cHeapRaw) instead. cHeapRaw is much faster but without fool-proofing for double delete.
